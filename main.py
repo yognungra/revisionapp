@@ -29,7 +29,7 @@ def hash(input_text):
     hashed = ph.hash("input_text")
     return hashed
 
-c.execute("INSERT INTO Users(FirstName, LastName, Email, PasswordHash, UserRole, SchoolID) VALUES(?, ?, ?, ?, ?, ?);", ("Yog", "Nungra", "yognungra@gmail.com", hash("yognungra"), "Student", 1))
+c.execute("INSERT INTO Users(FirstName, LastName, Email, PasswordHash, UserRole, SchoolID) VALUES(?, ?, ?, ?, ?, ?);", ("Yog", "Nungra", "yognungra@gmail.com", ph.hash("yognungra"), "Student", 1))
 connection.commit()
 
 def log_in():
@@ -47,10 +47,6 @@ def log_in():
 
         databaseHash = c.execute("SELECT passwordHash FROM Users WHERE email=?", (email,))
 
-        try:
-            ph.verify(hash, databaseHash)
-        except Exception:
-            print("INCORRECT PASSWORD")
-
+        print(ph.verify(hash, databaseHash))
 
 log_in()
