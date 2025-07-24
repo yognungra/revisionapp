@@ -4,6 +4,10 @@ from argon2 import PasswordHasher
 
 ph = PasswordHasher()
 
+pass 
+"""
+check all systems
+"""
 connection = sqlite3.connect("Users.db")
 c = connection.cursor()
 print(c)
