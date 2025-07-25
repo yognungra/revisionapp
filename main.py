@@ -54,19 +54,40 @@ def log_in():
             print("Invalid Option! Try again.")
 
     if existing_user:
-
-
-
         verified = False
 
         while not verified:
             email = input("Email: ")
-            password = input("Password: ")
             databaseHash = c.execute("SELECT passwordHash FROM Users WHERE email=?", (email,))
             data = databaseHash.fetchone()
-            try:
-                print(ph.verify(data[0], password))
-            except Exception as e:
-                print("ERROR:", e)
+
+            if data is None:
+                print("Email not found. Please try again.")
+                continue
+
+            password_checked = False
+            while not password_checked:
+                password = input("Password: ")
+                try:
+                    if ph.verify(data[0], password):
+                        print("Login successful!")
+                        password_checked = True
+                        verified = True
+                except Exception:
+                    print("Incorrect password. Please try again.")
+
+    if not existing_user:
+        first_name = input("First Name: ")
+        last_name = input("Last Name: ")
+        email = input("Email: ")
+        password = input("Password: ")
+        user_role = input("User Role (e.g., Student, Teacher): ")
+        school_id = int(input("School ID: "))
+
+        hashed_password = ph.hash(password)
+        c.execute("INSERT INTO Users(FirstName, LastName, Email, PasswordHash, UserRole, SchoolID) VALUES(?, ?, ?, ?, ?, ?);", 
+                  (first_name, last_name, email, hashed_password, user_role, school_id))
+        connection.commit()
+        print("Registration successful!")
 
 log_in()
