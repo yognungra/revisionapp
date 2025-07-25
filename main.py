@@ -4,16 +4,9 @@ from argon2 import PasswordHasher
 
 ph = PasswordHasher()
 
-pass 
-"""
-check all systems
-"""
-
-"""
-One more check?
-"""
 connection = sqlite3.connect("Users.db")
 c = connection.cursor()
+c.execute("PRAGMA foreign_keys = ON;")
 print(c)
 
 c.execute("""
@@ -30,6 +23,43 @@ Users (
         );
           """)
 
+c.execute("""
+    CREATE TABLE IF NOT EXISTS
+Students (
+        StudentID INTEGER PRIMARY KEY NOT NULL,
+        YearGroup INTEGER NOT NULL,
+        Foreign Key(StudentID) REFERENCES Users(UserID) ON DELETE CASCADE ON UPDATE CASCADE,
+        );
+          """)
+
+c.execute("""
+    CREATE TABLE IF NOT EXISTS
+Teachers (
+        TeacherID INTEGER PRIMARY KEY NOT NULL,
+        Foreign Key(TeacherID) REFERENCES Users(UserID) ON DELETE CASCADE ON UPDATE CASCADE,
+        );
+          """)
+
+c.execute("""
+    CREATE TABLE IF NOT EXISTS
+Classes (
+        ClassID INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+        LocalClassIdentifier TEXT NOT NULL
+        ClassName TEXT NOT NULL,
+        SchoolID INTEGER NOT NULL,
+        Foreign Key(SchoolID) REFERENCES Schools(SchoolID) ON DELETE CASCADE ON UPDATE CASCADE,
+        );
+          """)
+
+
+
+c.execute("""
+    CREATE TABLE IF NOT EXISTS
+Schools (
+        SchoolID INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+        SchoolName TEXT NOT NULL,
+        );
+          """)
 
 
 
