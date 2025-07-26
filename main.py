@@ -9,9 +9,9 @@ c = connection.cursor()
 c.execute("PRAGMA foreign_keys = ON;")
 print(c)
 
+# Create tables
 c.execute("""
-    CREATE TABLE IF NOT EXISTS
-Users (
+    CREATE TABLE IF NOT EXISTS Users (
         UserID INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
         FirstName TEXT NOT NULL,
         LastName TEXT NOT NULL,
@@ -20,54 +20,81 @@ Users (
         UserRole TEXT NOT NULL,
         SchoolID INTEGER NOT NULL,
         DateCreated DATE DEFAULT current_date NOT NULL
-        );
-          """)
+    );
+""")
 
 c.execute("""
-    CREATE TABLE IF NOT EXISTS
-Students (
+    CREATE TABLE IF NOT EXISTS Students (
         StudentID INTEGER PRIMARY KEY NOT NULL,
         YearGroup INTEGER NOT NULL,
-        Foreign Key(StudentID) REFERENCES Users(UserID) ON DELETE CASCADE ON UPDATE CASCADE,
-        );
-          """)
+        UserID INTEGER NOT NULL,
+        FOREIGN KEY(UserID) REFERENCES Users(UserID) ON DELETE CASCADE ON UPDATE CASCADE
+    );
+""")
 
 c.execute("""
-    CREATE TABLE IF NOT EXISTS
-Teachers (
+    CREATE TABLE IF NOT EXISTS Teachers (
         TeacherID INTEGER PRIMARY KEY NOT NULL,
-        Foreign Key(TeacherID) REFERENCES Users(UserID) ON DELETE CASCADE ON UPDATE CASCADE,
-        );
-          """)
+        UserID INTEGER NOT NULL,
+        FOREIGN KEY(UserID) REFERENCES Users(UserID) ON DELETE CASCADE ON UPDATE CASCADE
+    );
+""")
 
 c.execute("""
-    CREATE TABLE IF NOT EXISTS
-Classes (
+    CREATE TABLE IF NOT EXISTS Classes (
         ClassID INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-        LocalClassIdentifier TEXT NOT NULL
-        ClassName TEXT NOT NULL,
+        LocalClassIdentifier TEXT NOT NULL,
         SchoolID INTEGER NOT NULL,
-        Foreign Key(SchoolID) REFERENCES Schools(SchoolID) ON DELETE CASCADE ON UPDATE CASCADE,
-        );
-          """)
-
-
+        FOREIGN KEY(SchoolID) REFERENCES Schools(SchoolID) ON DELETE CASCADE ON UPDATE CASCADE
+    );
+""")
 
 c.execute("""
-    CREATE TABLE IF NOT EXISTS
-Schools (
+    CREATE TABLE IF NOT EXISTS ClassTeachers (
+        ClassTeacherID INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+        ClassID INTEGER NOT NULL,
+        TeacherID INTEGER NOT NULL,
+        FOREIGN KEY(ClassID) REFERENCES Classes(ClassID) ON DELETE CASCADE ON UPDATE CASCADE,
+        FOREIGN KEY(TeacherID) REFERENCES Teachers(TeacherID) ON DELETE CASCADE ON UPDATE CASCADE
+    );
+""")
+
+c.execute("""
+    CREATE TABLE IF NOT EXISTS Enrollment (
+        EnrollmentID INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+        StudentID INTEGER NOT NULL,
+        ClassID INTEGER NOT NULL,
+        DateEnrolled DATE DEFAULT current_date NOT NULL,
+        FOREIGN KEY(StudentID) REFERENCES Students(StudentID) ON DELETE CASCADE ON UPDATE CASCADE,
+        FOREIGN KEY(ClassID) REFERENCES Classes(ClassID) ON DELETE CASCADE ON UPDATE CASCADE
+    );
+""")
+
+c.execute("""
+    CREATE TABLE IF NOT EXISTS StudentAvailability (
+        AvailabilityID INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+        StudentID INTEGER NOT NULL,
+        TimeID INTEGER NOT NULL,
+        FOREIGN KEY(StudentID) REFERENCES Students(StudentID) ON DELETE CASCADE ON UPDATE CASCADE,
+        FOREIGN KEY(TimeID) REFERENCES Times(TimeID) ON DELETE CASCADE ON UPDATE CASCADE
+    );
+""")
+
+c.execute("""
+    CREATE TABLE IF NOT EXISTS Times (
+        TimeID INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+        StartTime TEXT NOT NULL,
+        EndTime TEXT NOT NULL
+    );
+""")
+
+c.execute("""
+    CREATE TABLE IF NOT EXISTS Schools (
         SchoolID INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-        SchoolName TEXT NOT NULL,
-        );
-          """)
+        SchoolName TEXT NOT NULL
+    );
+""")
 
-
-
-def hash(input_text):
-    hashed = ph.hash("input_text")
-    return hashed
-
-#c.execute("INSERT INTO Users(FirstName, LastName, Email, PasswordHash, UserRole, SchoolID) VALUES(?, ?, ?, ?, ?, ?);", ("Yog", "Nungra", "yognungra@gmail.com", ph.hash("yognungra"), "Student", 1))
 connection.commit()
 
 def log_in():
