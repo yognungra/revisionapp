@@ -7,7 +7,9 @@ ph = PasswordHasher()
 connection = sqlite3.connect("Users.db")
 c = connection.cursor()
 c.execute("PRAGMA foreign_keys = ON;")
-print(c)
+
+connection.commit()
+
 
 # Create tables
 c.execute("""
@@ -95,6 +97,7 @@ c.execute("""
     );
 """)
 
+c.execute("INSERT INTO Schools(SchoolName) VALUES('Default School');")
 connection.commit()
 
 def log_in():
