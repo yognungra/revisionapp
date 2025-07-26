@@ -97,7 +97,7 @@ c.execute("""
     );
 """)
 
-c.execute("INSERT INTO Schools(SchoolName) VALUES('Default School');")
+c.execute("INSERT INTO Schools(SchoolName)")
 connection.commit()
 
 def log_in():
