@@ -10,6 +10,8 @@ c.execute("PRAGMA foreign_keys = ON;")
 
 connection.commit()
 
+global current_user_token
+current_user_token = None
 
 # Create tables
 c.execute("""
@@ -24,6 +26,9 @@ c.execute("""
         DateCreated DATE DEFAULT current_date NOT NULL
     );
 """)
+
+c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON Users(Email);")
+
 
 c.execute("""
     CREATE TABLE IF NOT EXISTS Students (
@@ -132,21 +137,124 @@ def log_in():
                         print("Login successful!")
                         password_checked = True
                         verified = True
+                        c.execute("SELECT userID FROM Users WHERE email=?", (email,))  # Set the current user token
+                        current_user_token = c.fetchone()[0]
+                        print(f"Current User Token: {current_user_token}")
                 except Exception:
                     print("Incorrect password. Please try again.")
+    else:
+        sign_up()
 
-    if not existing_user:
-        first_name = input("First Name: ")
-        last_name = input("Last Name: ")
-        email = input("Email: ")
-        password = input("Password: ")
-        user_role = input("User Role (e.g., Student, Teacher): ")
-        school_id = int(input("School ID: "))
 
-        hashed_password = ph.hash(password)
-        c.execute("INSERT INTO Users(FirstName, LastName, Email, PasswordHash, UserRole, SchoolID) VALUES(?, ?, ?, ?, ?, ?);", 
-                  (first_name, last_name, email, hashed_password, user_role, school_id))
-        connection.commit()
-        print("Registration successful!")
+def sign_up():
+    print("Please fill in the following details to sign up:")
+    # Additional sign-up logic can be added here if needed
+    first_name = input("First Name: ")
+    last_name = input("Last Name: ")
+    email = input("Email: ")
+
+    # Check if email already exists
+    while True:
+        email_check = c.execute("SELECT Email FROM Users WHERE Email=?", (email,))
+        if email_check.fetchone() is not None:
+            print("Email already exists. Please try a different email.")
+            email = input("Email: ")
+        else:
+            break
+
+    password = input("Password: ")
+    user_role_verified = False
+
+    while not user_role_verified:
+        user_role = input("User Role (Student/Teacher): ").strip().capitalize()
+        if user_role.lower() in ["student", "teacher"]:
+            user_role_verified = True
+        else:
+            print("Invalid role. Please enter 'Student' or 'Teacher'.")
+    school_id = int(input("School ID (provided by your teacher): "))
+    hashed_password = ph.hash(password)
+    c.execute("INSERT INTO Users(FirstName, LastName, Email, PasswordHash, UserRole, SchoolID) VALUES(?, ?, ?, ?, ?, ?);", 
+              (first_name, last_name, email, hashed_password, user_role, school_id))
+    
+    if user_role.lower() == "student":
+        year_group = int(input("Year Group: "))
+        c.execute("INSERT INTO Students(YearGroup, UserID) VALUES(?, (SELECT UserID FROM Users WHERE Email=?));", 
+                  (year_group, email))
+    elif user_role.lower() == "teacher":
+        c.execute("INSERT INTO Teachers(UserID) VALUES((SELECT UserID FROM Users WHERE Email=?));", 
+                  (email,))
+        
+    connection.commit()
+    print("Registration successful!")
+
+def add_school():
+    school_name = input("Enter the school name: ")
+    c.execute("INSERT INTO Schools(SchoolName) VALUES(?);", (school_name,))
+    connection.commit()
+    print("School added successfully!")
+
+def add_class():
+    if current_user_token is None:
+        print("You must be logged in to add a class.")
+        return
+    
+    if c.execute("SELECT UserRole FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0].lower() != "teacher":
+        print("Entry denied! Only teachers can add classes.")
+        return False
+    
+    local_class_identifier = input("Enter the local class identifier: ")
+    school_id = int(input("Enter the school ID: "))
+    c.execute("INSERT INTO Classes(LocalClassIdentifier, SchoolID) VALUES(?, ?);", 
+              (local_class_identifier, school_id))
+    connection.commit()
+    print("Class added successfully!")
+
+    return True
+
+def add_teacher_to_class():
+    if current_user_token is None:
+        print("You must be logged in to add a teacher to a class.")
+        return
+    
+    if c.execute("SELECT UserRole FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0].lower() != "teacher":
+        print("Entry denied! Only teachrs can add teachers to classes.")
+        return False
+    class_id = int(input("Enter the class ID: "))
+    teacher_id = int(input("Enter the teacher ID: "))
+    c.execute("INSERT INTO ClassTeachers(ClassID, TeacherID) VALUES(?, ?);", 
+              (class_id, teacher_id))
+    connection.commit()
+    print("Teacher added to class successfully!")
+    return True
+
+def add_student_to_class():
+    if current_user_token is None:
+        print("You must be logged in to add a student to a class.")
+        return
+    
+    if c.execute("SELECT UserRole FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0].lower() != "teacher":
+        print("Entry denied! Only teachers can add students to classes.")
+        return False
+    
+    student_id = int(input("Enter the student ID: "))
+    class_id = int(input("Enter the class ID: "))
+    c.execute("INSERT INTO Enrollment(StudentID, ClassID) VALUES(?, ?);", 
+              (student_id, class_id))
+    connection.commit()
+    print("Student added to class successfully!")
+    return True
+
+def add_student_availability():
+    if current_user_token is None:
+        print("You must be logged in to add student availability.")
+        return
+    
+    student_id = int(input("Enter the student ID: "))
+    start_time = input("Enter the start time (HH:MM) of when you : ")
+    end_time = input("Enter the end time (HH:MM): ")
+    c.execute("INSERT INTO StudentAvailability(StudentID, TimeID) VALUES(?, ?);", 
+              (student_id, time_id))
+    connection.commit()
+    print("Student availability added successfully!")
 
 log_in()
