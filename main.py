@@ -1,10 +1,14 @@
 import sqlite3
 import hashlib
 from argon2 import PasswordHasher
+from datetime import datetime
+
 
 ph = PasswordHasher()
 
-connection = sqlite3.connect("Users.db")
+
+# Connect to the SQLite database
+connection = sqlite3.connect("tables.db")
 c = connection.cursor()
 c.execute("PRAGMA foreign_keys = ON;")
 
@@ -78,27 +82,44 @@ c.execute("""
 """)
 
 c.execute("""
-    CREATE TABLE IF NOT EXISTS StudentAvailability (
-        AvailabilityID INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+    CREATE TABLE IF NOT EXISTS StudentBusyTimes (
+        BusyID INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
         StudentID INTEGER NOT NULL,
-        TimeID INTEGER NOT NULL,
-        FOREIGN KEY(StudentID) REFERENCES Students(StudentID) ON DELETE CASCADE ON UPDATE CASCADE,
-        FOREIGN KEY(TimeID) REFERENCES Times(TimeID) ON DELETE CASCADE ON UPDATE CASCADE
+        StartTime TEXT NOT NULL,
+        EndTime TEXT NOT NULL,
+        FOREIGN KEY(StudentID) REFERENCES Students(StudentID) ON DELETE CASCADE ON UPDATE CASCADE
     );
 """)
 
-c.execute("""
-    CREATE TABLE IF NOT EXISTS Times (
-        TimeID INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-        StartTime TEXT NOT NULL,
-        EndTime TEXT NOT NULL
-    );
-""")
 
 c.execute("""
     CREATE TABLE IF NOT EXISTS Schools (
         SchoolID INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
         SchoolName TEXT NOT NULL
+    );
+""")
+
+c.execute("""
+    CREATE TABLE IF NOT EXISTS Periods (
+        PeriodID INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+        StartTime TEXT NOT NULL,
+        EndTime TEXT NOT NULL,
+        ClassID INTEGER NOT NULL,
+        TeacherID INTEGER NOT NULL,
+        FOREIGN KEY(TeacherID) REFERENCES Teachers(TeacherID) ON DELETE CASCADE ON UPDATE CASCADE,
+        FOREIGN KEY(ClassID) REFERENCES Classes(ClassID) ON DELETE CASCADE ON UPDATE CASCADE
+    );
+""")
+
+c.execute("""
+    CREATE TABLE IF NOT EXISTS EnrollmentRequests (
+        RequestID INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+        StudentID INTEGER NOT NULL,
+        ClassID INTEGER NOT NULL,
+        RequestDate DATE DEFAULT current_date NOT NULL,
+        Status TEXT DEFAULT 'Pending' NOT NULL,
+        FOREIGN KEY(StudentID) REFERENCES Students(StudentID) ON DELETE CASCADE ON UPDATE CASCADE,
+        FOREIGN KEY(ClassID) REFERENCES Classes(ClassID) ON DELETE CASCADE ON UPDATE CASCADE
     );
 """)
 
@@ -217,10 +238,15 @@ def add_teacher_to_class():
         return
     
     if c.execute("SELECT UserRole FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0].lower() != "teacher":
-        print("Entry denied! Only teachrs can add teachers to classes.")
+        print("Entry denied! Only teachers can add teachers to classes.")
         return False
     class_id = int(input("Enter the class ID: "))
-    teacher_id = int(input("Enter the teacher ID: "))
+    teacher_id = int(input("Enter the teacher ID (or leave blank to select yourself): ") or current_user_token)
+    if teacher_id == current_user_token:
+        c.execute("SELECT TeacherID FROM Teachers WHERE UserID=?", (current_user_token,))
+        if c.fetchone() is None:
+            print("You are not registered as a teacher. Please register first.")
+            return False
     c.execute("INSERT INTO ClassTeachers(ClassID, TeacherID) VALUES(?, ?);", 
               (class_id, teacher_id))
     connection.commit()
@@ -244,17 +270,129 @@ def add_student_to_class():
     print("Student added to class successfully!")
     return True
 
-def add_student_availability():
+def request_to_join_class():
     if current_user_token is None:
-        print("You must be logged in to add student availability.")
+        print("You must be logged in to request to join a class.")
         return
     
-    student_id = int(input("Enter the student ID: "))
-    start_time = input("Enter the start time (HH:MM) of when you : ")
+    if c.execute("SELECT UserRole FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0].lower() != "student":
+        print("Entry denied! Only students can request to join classes.")
+        return False
+    
+    class_id = int(input("Enter the class ID you want to join: "))
+
+    class_exists = c.execute("SELECT ClassID FROM Classes WHERE ClassID=?", (class_id,)).fetchone()
+    if class_exists is None:
+        print("Class does not exist. Please check the class ID and try again.")
+        return False
+    
+
+    student_id = c.execute("SELECT StudentID FROM Students WHERE UserID=?", (current_user_token,)).fetchone()[0]
+    
+    c.execute("INSERT INTO EnrollmentRequests(StudentID, ClassID) VALUES(?, ?);", 
+              (student_id, class_id))
+    
+    connection.commit()
+    print("Request to join class submitted successfully!") 
+    return True
+
+def approve_enrollment_request():
+    if current_user_token is None:
+        print("You must be logged in to approve enrollment requests.")
+        return
+    
+    if c.execute("SELECT UserRole FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0].lower() != "teacher":
+        print("Entry denied! Only teachers can approve enrollment requests.")
+        return False
+    
+    list_requests = c.execute("SELECT RequestID, StudentID, ClassID FROM EnrollmentRequests WHERE ClassID IN (SELECT ClassID FROM ClassTeachers WHERE TeacherID=(SELECT TeacherID FROM Teachers WHERE UserID=?));", (current_user_token,)).fetchall()
+    if not list_requests:
+        print("No enrollment requests to approve.")
+        return False
+    
+    print("Enrollment Requests:")
+    for request in list_requests:
+        print(f"Request ID: {request[0]}, Student ID: {request[1]}, Class ID: {request[2]}")
+        choice_approved = False
+        while not choice_approved:
+            choice = input("Do you want to approve this request? (Y/N): ").strip().lower()
+            if choice == 'y':
+                c.execute("INSERT INTO Enrollment(StudentID, ClassID) VALUES(?, ?);", (request[1], request[2]))
+                c.execute("UPDATE EnrollmentRequests SET Status='Approved' WHERE RequestID=?;", (request[0],))
+                print(f"Request ID {request[0]} approved successfully!")
+                connection.commit()
+                choice_approved = True
+            elif choice == 'n':
+                print(f"Request ID {request[0]} not approved.")
+                c.execute("UPDATE EnrollmentRequests SET Status='Denied' WHERE RequestID=?;", (request[0],))
+                connection.commit()
+                choice_approved = True
+            else:
+                print("Invalid choice. Please enter 'Y' or 'N'.")
+    
+    if request is None:
+        print("Request not found. Please check the request ID and try again.")
+        return False
+    
+    student_id, class_id = request
+    c.execute("INSERT INTO Enrollment(StudentID, ClassID) VALUES(?, ?);", (student_id, class_id))
+    c.execute("DELETE FROM EnrollmentRequests WHERE RequestID=?;", (request_id,))
+    
+    connection.commit()
+    print("Enrollment request approved successfully!")
+    return True
+    
+
+def add_busy_time():
+    if current_user_token is None:
+        print("You must be logged in to add the times when you are busy.")
+        return False
+    
+    if c.execute("SELECT UserRole FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0].lower() != "student":
+        print("Entry denied! Only students can add their busy periods.")
+        return False
+    
+    start_time = input("Enter the start time (HH:MM): ")
+    start_time = datetime.strptime(start_time, "%H:%M").strftime("%H:%M")
     end_time = input("Enter the end time (HH:MM): ")
-    c.execute("INSERT INTO StudentAvailability(StudentID, TimeID) VALUES(?, ?);", 
-              (student_id, time_id))
+    end_time = datetime.strptime(end_time, "%H:%M").strftime("%H:%M")   
+    student_id = c.execute("SELECT StudentID FROM Students WHERE UserID=?", (current_user_token,)).fetchone()[0]
+
+    c.execute("INSERT INTO StudentAvailability(StudentID, StartTime, EndTime) VALUES(?, ?);", 
+              (student_id, start_time, end_time))
     connection.commit()
     print("Student availability added successfully!")
+
+def add_period():
+    if current_user_token is None:
+        print("You must be logged in to add a period.")
+        return False
+    
+    if c.execute("SELECT UserRole FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0].lower() != "teacher":
+        print("Entry denied! Only teachers can add periods.")
+        return False
+    
+    start_time = input("Enter the start time (HH:MM): ")
+    end_time = input("Enter the end time (HH:MM): ")
+    class_id = int(input("Enter the class ID: "))
+    teacher_id = c.execute("SELECT TeacherID FROM Teachers WHERE UserID=?", (current_user_token,)).fetchone()[0]
+    
+    c.execute("INSERT INTO Periods(StartTime, EndTime, ClassID, TeacherID) VALUES(?, ?, ?, ?);", 
+              (start_time, end_time, class_id, teacher_id))
+    connection.commit()
+    print("Period added successfully!")
+
+    c.execute("""
+              SELECT StudentID FROM Students
+                WHERE UserID IN (SELECT UserID FROM Users WHERE SchoolID = (SELECT SchoolID FROM Classes WHERE ClassID = ?));
+                """, (class_id,))
+    students = c.fetchall()
+    for student in students:
+        c.execute("INSERT INTO StudentBusyTimes(StudentID, StartTime, EndTime) VALUES(?, ?, ?);", 
+                  (student[0], start_time, end_time))
+    connection.commit()
+    print("Busy times for students in the class have been updated successfully!")
+
+    return True
 
 log_in()
