@@ -126,6 +126,8 @@ c.execute("""
 connection.commit()
 
 def log_in():
+    global current_user_token
+    print("Welcome to the Revision App!")
     valid_option = False
     while not valid_option:
         existing_user = input("Are you an existing user Y/N: ")
@@ -135,6 +137,10 @@ def log_in():
         elif existing_user.lower() == "n" or existing_user.lower() == "no":
             existing_user = False
             valid_option = True
+            sign_up()
+        elif existing_user.lower() == "q" or existing_user.lower() == "quit":
+            print("Exiting the application.")
+            exit()
         else:
             print("Invalid Option! Try again.")
 
@@ -161,6 +167,15 @@ def log_in():
                         c.execute("SELECT userID FROM Users WHERE email=?", (email,))  # Set the current user token
                         current_user_token = c.fetchone()[0]
                         print(f"Current User Token: {current_user_token}")
+
+                        c.execute("SELECT UserRole FROM Users WHERE UserID=?", (current_user_token,))
+                        user_role = c.fetchone()[0].lower()
+                        if user_role == "student":
+                            student_options()
+                        elif user_role == "teacher":
+                            teacher_options()
+                        else:
+                            print("Invalid User Role. Please try again..")
                 except Exception:
                     print("Incorrect password. Please try again.")
     else:
@@ -168,6 +183,7 @@ def log_in():
 
 
 def sign_up():
+    global current_user_token
     print("Please fill in the following details to sign up:")
     # Additional sign-up logic can be added here if needed
     first_name = input("First Name: ")
@@ -209,15 +225,17 @@ def sign_up():
     print("Registration successful!")
 
 def add_school():
+    global current_user_token
     school_name = input("Enter the school name: ")
     c.execute("INSERT INTO Schools(SchoolName) VALUES(?);", (school_name,))
     connection.commit()
     print("School added successfully!")
 
 def add_class():
+    global current_user_token
     if current_user_token is None:
         print("You must be logged in to add a class.")
-        return
+        return False
     
     if c.execute("SELECT UserRole FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0].lower() != "teacher":
         print("Entry denied! Only teachers can add classes.")
@@ -233,6 +251,7 @@ def add_class():
     return True
 
 def add_teacher_to_class():
+    global current_user_token
     if current_user_token is None:
         print("You must be logged in to add a teacher to a class.")
         return
@@ -254,6 +273,7 @@ def add_teacher_to_class():
     return True
 
 def add_student_to_class():
+    global current_user_token
     if current_user_token is None:
         print("You must be logged in to add a student to a class.")
         return
@@ -271,6 +291,7 @@ def add_student_to_class():
     return True
 
 def request_to_join_class():
+    global current_user_token
     if current_user_token is None:
         print("You must be logged in to request to join a class.")
         return
@@ -297,6 +318,7 @@ def request_to_join_class():
     return True
 
 def approve_enrollment_request():
+    global current_user_token
     if current_user_token is None:
         print("You must be logged in to approve enrollment requests.")
         return
@@ -344,6 +366,7 @@ def approve_enrollment_request():
     
 
 def add_busy_time():
+    global current_user_token
     if current_user_token is None:
         print("You must be logged in to add the times when you are busy.")
         return False
@@ -358,12 +381,13 @@ def add_busy_time():
     end_time = datetime.strptime(end_time, "%H:%M").strftime("%H:%M")   
     student_id = c.execute("SELECT StudentID FROM Students WHERE UserID=?", (current_user_token,)).fetchone()[0]
 
-    c.execute("INSERT INTO StudentAvailability(StudentID, StartTime, EndTime) VALUES(?, ?);", 
+    c.execute("INSERT INTO StudentBusyTimes(StudentID, StartTime, EndTime) VALUES(?, ?);", 
               (student_id, start_time, end_time))
     connection.commit()
     print("Student availability added successfully!")
 
 def add_period():
+    global current_user_token
     if current_user_token is None:
         print("You must be logged in to add a period.")
         return False
@@ -394,5 +418,63 @@ def add_period():
     print("Busy times for students in the class have been updated successfully!")
 
     return True
+
+def student_options():
+    global current_user_token
+    choice_verified = False
+    while not choice_verified:
+        print("Welcome to the Student Portal!")
+        print("1. Request to join a class")
+        print("2. Add busy time")
+        print("3. Log out")
+        choice = input("Choose an option: ")
+        if choice == "1":
+            request_to_join_class()
+            choice_verified = True
+        elif choice == "2":
+            add_busy_time()
+            choice_verified = True
+        elif choice == "3":
+            global current_user_token
+            current_user_token = None
+            print("Logged out successfully.")
+            choice_verified = True
+        else:
+            print("Invalid option. Please try again.")
+    student_options() if current_user_token is not None else log_in()
+
+
+def teacher_options():
+    global current_user_token
+    choice_verified = False
+    while not choice_verified:
+        print("1. Add a school")
+        print("2. Add a class")
+        print("3. Add a teacher to a class")
+        print("4. Add a student to a class")
+        print("5. Approve enrollment requests")
+        print("6. Add a period")
+        print("7. Log out")
+        choice = input("Choose an option: ")
+        if choice == "1":
+            add_school()
+        elif choice == "2":
+            add_class()
+        elif choice == "3":
+            add_teacher_to_class()
+        elif choice == "4":
+            add_student_to_class()
+        elif choice == "5":
+            approve_enrollment_request()
+        elif choice == "6":
+            add_period()
+        elif choice == "7":
+            global current_user_token
+            current_user_token = None
+            print("Logged out successfully.")
+        else:
+            print("Invalid option. Please try again.")
+    teacher_options() if current_user_token is not None else log_in()
+
 
 log_in()
