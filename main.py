@@ -26,7 +26,9 @@ c.execute("""
         Email TEXT NOT NULL,
         PasswordHash TEXT NOT NULL,
         UserRole TEXT NOT NULL,
-        SchoolID INTEGER NOT NULL,
+        SchoolID INTEGER,
+        IsSchooolAdmin BOOLEAN DEFAULT FALSE NOT NULL,
+        FOREIGN KEY(SchoolID) REFERENCES Schools(SchoolID) ON DELETE CASCADE ON UPDATE CASCADE,
         DateCreated DATE DEFAULT current_date NOT NULL
     );
 """)
@@ -99,6 +101,8 @@ c.execute("""
     );
 """)
 
+c.execute("SET UNIQUE INDEX IF NOT EXISTS idx_schools_name ON Schools(SchoolName);")
+
 c.execute("""
     CREATE TABLE IF NOT EXISTS Periods (
         PeriodID INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
@@ -122,6 +126,19 @@ c.execute("""
         FOREIGN KEY(ClassID) REFERENCES Classes(ClassID) ON DELETE CASCADE ON UPDATE CASCADE
     );
 """)
+
+c.execute("""
+    CREATE TABLE IF NOT EXISTS SchoolJoinRequests (
+        RequestID INTEGER PRIMARY KEY AUTOINCREMENT,
+        TeacherID INTEGER NOT NULL,
+        SchoolID INTEGER NOT NULL,
+        Status TEXT DEFAULT 'Pending' NOT NULL,
+        RequestDate DATE DEFAULT current_date,
+        FOREIGN KEY (TeacherID) REFERENCES Teachers(TeacherID) ON DELETE CASCADE,
+        FOREIGN KEY (SchoolID) REFERENCES Schools(SchoolID) ON DELETE CASCADE
+    );
+""")
+
 
 connection.commit()
 
@@ -226,8 +243,25 @@ def sign_up():
 
 def add_school():
     global current_user_token
+    if current_user_token is None:
+        print("You must be logged in to add a school.")
+        return False
+    if c.execute("SELECT UserRole FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0].lower() != "teacher":
+        print("Entry denied! Only teachers can add schools.")
+        return False
+    if c.execute("SELECT IsSchooolAdmin FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0]:
+        print("Entry denied! You are already a school admin.")
+        return False
+    
+    # Check if the user is a teacher and not already a school admin
+    c.execute("UPDATE Users SET IsSchooolAdmin = TRUE WHERE UserID = ?", (current_user_token,))
+    connection.commit()
+    print("You are now a school admin.")
+
     school_name = input("Enter the school name: ")
     c.execute("INSERT INTO Schools(SchoolName) VALUES(?);", (school_name,))
+    c.execute("UPDATE Users SET SchoolID = (SELECT SchoolID FROM Schools WHERE SchoolName = ?) WHERE UserID = ?;", 
+              (school_name, current_user_token))
     connection.commit()
     print("School added successfully!")
 
@@ -418,6 +452,48 @@ def add_period():
     print("Busy times for students in the class have been updated successfully!")
 
     return True
+
+def add_teacher_to_school():
+    global current_user_token
+    if current_user_token is None:
+        print("You must be logged in to add a teacher to a school.")
+        return
+    
+    if c.execute("SELECT UserRole FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0].lower() != "teacher":
+        print("Entry denied! Only teachers can add teachers to schools.")
+        return False
+    
+    if not c.execute("SELECT IsSchooolAdmin FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0]:
+        print("Entry denied! You must be a school admin to add teachers to a school.")
+        return False
+    
+    teacher_email = input("Enter the email of the teacher you want to add: ")
+    if c.execute("SELECT UserID FROM Users WHERE Email=?", (teacher_email,)).fetchone() is None:
+        print("Teacher not found. Please check the email and try again.")
+        return False
+    
+    teacher_id = c.execute("SELECT UserID FROM Users WHERE Email=?", (teacher_email,)).fetchone()[0]
+    school_id = c.execute("SELECT SchoolID FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0]
+    c.execute("UPDATE Users SET SchoolID = ? WHERE UserID = ?;", (school_id, c.execute("SELECT UserID FROM Users WHERE Email=?", (teacher_email,)).fetchone()[0]))
+
+def request_to_join_school():
+    global current_user_token
+    if current_user_token is None:
+        print("You must be logged in to request to join a school.")
+        return
+    if c.execute("SELECT UserRole FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0].lower() != "teacher":
+        print("Entry denied! Only teachers can request to join schools.")
+        return False
+    
+    school_id = int(input("Enter the school ID you want to join: "))
+    school_exists = c.execute("SELECT SchoolID FROM Schools WHERE SchoolID=?", (school_id,)).fetchone()
+    if school_exists is None:
+        print("School does not exist. Please check the school ID and try again.")
+        return False
+    c.execute("INSERT INTO SchoolJoinRequests(TeacherID, SchoolID) VALUES(?, ?);", 
+              (c.execute("SELECT TeacherID FROM Teachers WHERE UserID=?", (current_user_token,)).fetchone()[0], school_id))
+    connection.commit()
+    print("Request to join school submitted successfully!")
 
 def student_options():
     global current_user_token
