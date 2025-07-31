@@ -130,7 +130,7 @@ c.execute("""
 c.execute("""
     CREATE TABLE IF NOT EXISTS SchoolJoinRequests (
         RequestID INTEGER PRIMARY KEY AUTOINCREMENT,
-        TeacherID INTEGER NOT NULL,
+        UserID INTEGER NOT NULL,
         SchoolID INTEGER NOT NULL,
         Status TEXT DEFAULT 'Pending' NOT NULL,
         RequestDate DATE DEFAULT current_date,
@@ -481,19 +481,53 @@ def request_to_join_school():
     if current_user_token is None:
         print("You must be logged in to request to join a school.")
         return
-    if c.execute("SELECT UserRole FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0].lower() != "teacher":
-        print("Entry denied! Only teachers can request to join schools.")
-        return False
     
     school_id = int(input("Enter the school ID you want to join: "))
     school_exists = c.execute("SELECT SchoolID FROM Schools WHERE SchoolID=?", (school_id,)).fetchone()
     if school_exists is None:
         print("School does not exist. Please check the school ID and try again.")
         return False
-    c.execute("INSERT INTO SchoolJoinRequests(TeacherID, SchoolID) VALUES(?, ?);", 
-              (c.execute("SELECT TeacherID FROM Teachers WHERE UserID=?", (current_user_token,)).fetchone()[0], school_id))
+    c.execute("INSERT INTO SchoolJoinRequests(UserID, SchoolID) VALUES(?, ?);", 
+              (c.execute(current_user_token, school_id)))
     connection.commit()
     print("Request to join school submitted successfully!")
+
+def approve_school_join_request():
+    if current_user_token is None:
+        print("You must be logged in to approve school join requests.")
+        return
+    if c.execute("SELECT isSchooolAdmin FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0] is False:
+        print("Entry denied! Only school admins can approve school join requests.")
+        return False
+    
+    requests = c.execute("SELECT RequestID, UserID FROM SchoolJoinRequests WHERE Status='Pending' AND SchoolID=(SELECT SchoolID FROM Users WHERE UserID=?);", (current_user_token,)).fetchall()
+    if not requests:
+        print("No school join requests to approve.")
+        return False
+    print("School Join Requests:")
+    for request in requests:
+        c.execute("SELECT FirstName, LastName, Email FROM Users WHERE UserID=?", (request[1],))
+        user = c.fetchone()
+        if user is None:
+            print(f"Request ID: {request[0]} - User not found.")
+            continue
+        print(f"Request ID: {request[0]}, User: {user[0]} {user[1]} {user[2]}")
+        choice_approved = False
+        while not choice_approved:
+            choice = input("Do you want to approve this request? (Y/N): ").strip().lower()
+            if choice == 'y':
+                c.execute("UPDATE SchoolJoinRequests SET Status='Approved' WHERE RequestID=?;", (request[0],))
+                c.execute("UPDATE Users SET SchoolID=(SELECT SchoolID FROM SchoolJoinRequests WHERE RequestID=?) WHERE UserID=?;", (request[0], request[1]))
+                connection.commit()
+                print(f"Request ID {request[0]} approved successfully!")
+                choice_approved = True
+            elif choice == 'n':
+                c.execute("UPDATE SchoolJoinRequests SET Status='Denied' WHERE RequestID=?;", (request[0],))
+                connection.commit()
+                print(f"Request ID {request[0]} not approved.")
+                choice_approved = True
+            else:
+                print("Invalid choice. Please enter 'Y' or 'N'.")
 
 def student_options():
     global current_user_token
