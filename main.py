@@ -533,67 +533,67 @@ def approve_school_join_request():
 
 def student_options():
     global current_user_token
-    choice_verified = False
-    while True:
-        print("Welcome to the Student Portal!")
+    while current_user_token is not None:
         print("1. Request to join a class")
         print("2. Add busy time")
-        print("3. Log out")
+        print("3. Request to join a school")
+        print("4. Log out")
+
         choice = input("Choose an option: ")
+
         if choice == "1":
             request_to_join_class()
-            break
         elif choice == "2":
             add_busy_time()
-            break
         elif choice == "3":
-            global current_user_token
+            request_to_join_school()
+        elif choice == "4":
             current_user_token = None
-            print("Logged out successfully.")
-            break
+            print("✅ Logged out successfully.")
         else:
-            print("Invalid option. Please try again.")
-    student_options() if current_user_token is not None else log_in()
+            print("❌ Invalid option. Please try again.")
 
 
 def teacher_options():
     global current_user_token
-    choice_verified = False
-    while True:
+    while current_user_token is not None:
         print("1. Add a school")
         print("2. Add a class")
         print("3. Add a teacher to a class")
         print("4. Add a student to a class")
         print("5. Approve enrollment requests")
         print("6. Add a period")
-        print("7. Log out")
+        print("7. Add teacher to school")
+        print("8. Approve school join requests")
+        print("9. Request to join a school")
+        print("10. Log out")
+
         choice = input("Choose an option: ")
+
         if choice == "1":
             add_school()
-            break
         elif choice == "2":
             add_class()
-            break
         elif choice == "3":
             add_teacher_to_class()
-            break
         elif choice == "4":
             add_student_to_class()
-            break
         elif choice == "5":
             approve_enrollment_request()
-            break
         elif choice == "6":
             add_period()
-            break
         elif choice == "7":
-            global current_user_token
+            add_teacher_to_school()
+        elif choice == "8":
+            approve_school_join_request()
+        elif choice == "9":
+            request_to_join_school()
+        elif choice == "10":
             current_user_token = None
-            print("Logged out successfully.")
-            break
+            print("✅ Logged out successfully.")
         else:
-            print("Invalid option. Please try again.")
-    teacher_options() if current_user_token is not None else log_in()
+            print("❌ Invalid option. Please try again.")
+
 
 
 log_in()
