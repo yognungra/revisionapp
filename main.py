@@ -17,6 +17,28 @@ connection.commit()
 global current_user_token
 current_user_token = None
 
+
+# Helper functions
+def get_user_role(user_id):
+    return c.execute("SELECT UserRole FROM Users WHERE UserID=?", (user_id,)).fetchone()[0].lower()
+
+def get_school_id(user_id):
+    return c.execute("SELECT SchoolID FROM Users WHERE UserID=?", (user_id,)).fetchone()[0]
+
+def get_teacher_id(user_id):
+    return c.execute("SELECT TeacherID FROM Teachers WHERE UserID=?", (user_id,)).fetchone()[0]
+
+def get_student_id(user_id):
+    return c.execute("SELECT StudentID FROM Students WHERE UserID=?", (user_id,)).fetchone()[0]
+
+def ensure_logged_in():
+    if current_user_token is None:
+        print("❌ You must be logged in to perform this action.")
+        return False
+    return True
+
+
+
 # Create tables
 c.execute("""
     CREATE TABLE IF NOT EXISTS Users (
@@ -145,108 +167,104 @@ connection.commit()
 def log_in():
     global current_user_token
     print("Welcome to the Revision App!")
-    valid_option = False
-    while not valid_option:
-        existing_user = input("Are you an existing user Y/N: ")
-        if existing_user.lower() == "y" or existing_user.lower() == "yes":
-            existing_user = True
-            valid_option = True
-        elif existing_user.lower() == "n" or existing_user.lower() == "no":
-            existing_user = False
-            valid_option = True
-            sign_up()
-        elif existing_user.lower() == "q" or existing_user.lower() == "quit":
+    while True:
+        choice = input("Are you an existing user (Y/N)? Or type 'Q' to quit: ").strip().lower()
+        if choice == 'y':
+            return login_flow()
+        elif choice == 'n':
+            return sign_up()
+        elif choice == 'q':
             print("Exiting the application.")
             exit()
         else:
-            print("Invalid Option! Try again.")
+            print("Invalid option. Try again.")
 
-    if existing_user:
-        verified = False
+def login_flow():
+    global current_user_token
+    while True:
+        email = input("Email: ")
+        row = c.execute("SELECT UserID, PasswordHash, UserRole FROM Users WHERE Email=?", (email,)).fetchone()
+        if not row:
+            print("Email not found. Please try again.")
+            continue
 
-        while not verified:
-            email = input("Email: ")
-            databaseHash = c.execute("SELECT passwordHash FROM Users WHERE email=?", (email,))
-            data = databaseHash.fetchone()
-
-            if data is None:
-                print("Email not found. Please try again.")
-                continue
-
-            password_checked = False
-            while not password_checked:
-                password = input("Password: ")
-                try:
-                    if ph.verify(data[0], password):
-                        print("Login successful!")
-                        password_checked = True
-                        verified = True
-                        c.execute("SELECT userID FROM Users WHERE email=?", (email,))  # Set the current user token
-                        current_user_token = c.fetchone()[0]
-                        print(f"Current User Token: {current_user_token}")
-
-                        c.execute("SELECT UserRole FROM Users WHERE UserID=?", (current_user_token,))
-                        user_role = c.fetchone()[0].lower()
-                        if user_role == "student":
-                            student_options()
-                        elif user_role == "teacher":
-                            teacher_options()
-                        else:
-                            print("Invalid User Role. Please try again..")
-                except Exception:
-                    print("Incorrect password. Please try again.")
-    else:
-        sign_up()
-
+        user_id, password_hash, role = row
+        password = input("Password: ")
+        try:
+            ph.verify(password_hash, password)
+            current_user_token = user_id
+            print(f"✅ Login successful! User ID: {current_user_token}")
+            return student_options() if role.lower() == "student" else teacher_options()
+        except:
+            print("❌ Incorrect password. Please try again.")
 
 def sign_up():
     global current_user_token
     print("Please fill in the following details to sign up:")
-    # Additional sign-up logic can be added here if needed
     first_name = input("First Name: ")
     last_name = input("Last Name: ")
-    email = input("Email: ")
 
-    # Check if email already exists
+    # Email uniqueness
     while True:
-        email_check = c.execute("SELECT Email FROM Users WHERE Email=?", (email,))
-        if email_check.fetchone() is not None:
-            print("Email already exists. Please try a different email.")
-            email = input("Email: ")
+        email = input("Email: ")
+        if c.execute("SELECT 1 FROM Users WHERE Email=?", (email,)).fetchone():
+            print("⚠️ Email already exists. Try a different one.")
         else:
             break
 
+    # Password and Role
     password = input("Password: ")
-    user_role_verified = False
-
-    while not user_role_verified:
-        user_role = input("User Role (Student/Teacher): ").strip().capitalize()
-        if user_role.lower() in ["student", "teacher"]:
-            user_role_verified = True
-        else:
-            print("Invalid role. Please enter 'Student' or 'Teacher'.")
-    school_id = int(input("School ID (provided by your teacher): "))
     hashed_password = ph.hash(password)
-    c.execute("INSERT INTO Users(FirstName, LastName, Email, PasswordHash, UserRole, SchoolID) VALUES(?, ?, ?, ?, ?, ?);", 
-              (first_name, last_name, email, hashed_password, user_role, school_id))
-    
-    if user_role.lower() == "student":
-        year_group = int(input("Year Group: "))
-        c.execute("INSERT INTO Students(YearGroup, UserID) VALUES(?, (SELECT UserID FROM Users WHERE Email=?));", 
-                  (year_group, email))
-    elif user_role.lower() == "teacher":
-        c.execute("INSERT INTO Teachers(UserID) VALUES((SELECT UserID FROM Users WHERE Email=?));", 
-                  (email,))
-        
+
+    while True:
+        user_role = input("User Role (Student/Teacher): ").strip().lower()
+        if user_role in ["student", "teacher"]:
+            break
+        print("Invalid role. Please enter 'Student' or 'Teacher'.")
+
+    # Optional School ID
+    school_id = None
+    school_input = input("School ID (leave blank if none): ").strip()
+    if school_input:
+        try:
+            school_id = int(school_input)
+            if not c.execute("SELECT 1 FROM Schools WHERE SchoolID=?", (school_id,)).fetchone():
+                print("⚠️ Invalid school ID. Ignoring.")
+                school_id = None
+        except:
+            print("⚠️ Invalid input. Ignoring school ID.")
+
+    # Insert User
+    c.execute("""INSERT INTO Users (FirstName, LastName, Email, PasswordHash, UserRole)
+                 VALUES (?, ?, ?, ?, ?, ?)""", (first_name, last_name, email, hashed_password, user_role))
     connection.commit()
-    print("Registration successful!")
+    
+    user_id = c.execute("SELECT UserID FROM Users WHERE Email=?", (email,)).fetchone()[0]
+    current_user_token = user_id
+
+    if school_id:
+        c.execute("INSERT INTO SchoolJoinRequests (UserID, SchoolID) VALUES (?, ?)", (current_user_token, school_id))
+    connection.commit()
+
+    if user_role == "student":
+        year_group = int(input("Year Group: "))
+        c.execute("INSERT INTO Students (YearGroup, UserID) VALUES (?, ?)", (year_group, user_id))
+    else:
+        c.execute("INSERT INTO Teachers (UserID) VALUES (?)", (user_id,))
+
+    if school_id:
+        c.execute("INSERT INTO SchoolJoinRequests (UserID, SchoolID) VALUES (?, ?)", (user_id, school_id))
+    
+    connection.commit()
+    print("🎉 Registration complete!")
+    return student_options() if user_role == "student" else teacher_options()
 
 def add_school():
     global current_user_token
     if current_user_token is None:
         print("You must be logged in to add a school.")
         return False
-    if c.execute("SELECT UserRole FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0].lower() != "teacher":
+    if get_user_role(current_user_token) != "teacher":
         print("Entry denied! Only teachers can add schools.")
         return False
     if c.execute("SELECT IsSchoolAdmin FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0]:
@@ -270,7 +288,7 @@ def add_class():
         print("You must be logged in to add a class.")
         return False
     
-    if c.execute("SELECT UserRole FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0].lower() != "teacher":
+    if get_user_role(current_user_token) != "teacher":
         print("Entry denied! Only teachers can add classes.")
         return False
     
@@ -286,7 +304,7 @@ def add_class():
             continue
         else:
             input_verified = True
-    school_id = c.execute("SELECT SchoolID FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0]
+    school_id = get_school_id(current_user_token)
     c.execute("INSERT INTO Classes(LocalClassIdentifier, SchoolID) VALUES(?, ?);", 
               (local_class_identifier, school_id))
     connection.commit()
@@ -300,16 +318,29 @@ def add_teacher_to_class():
         print("You must be logged in to add a teacher to a class.")
         return
     
-    if c.execute("SELECT UserRole FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0].lower() != "teacher":
+    if get_user_role(current_user_token) != "teacher":
         print("Entry denied! Only teachers can add teachers to classes.")
         return False
+    
+    if not c.execute("SELECT IsSchoolAdmin FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0]:
+        print("Entry denied! You must be a school admin to add teachers to your classes.")
+        return False
+    
+
     class_id = int(input("Enter the class ID: "))
-    teacher_id = int(input("Enter the teacher ID (or leave blank to select yourself): ") or current_user_token)
-    if teacher_id == current_user_token:
-        c.execute("SELECT TeacherID FROM Teachers WHERE UserID=?", (current_user_token,))
-        if c.fetchone() is None:
-            print("You are not registered as a teacher. Please register first.")
-            return False
+    teacher_id = int(input("Enter the teacher ID (or leave blank to select yourself): ") or get_teacher_id(current_user_token))
+
+    c.execute("SELECT SchoolID FROM Classes WHERE ClassID=?", (class_id,))
+    school_id = c.fetchone()
+    if c.execute("SELECT SchoolID FROM Users WHERE UserID=?", (teacher_id,)).fetchone()[0] != school_id[0]:
+        print("Entry denied! The teacher must belong to the same school as the class.")
+        return False
+    
+    if c.execute("SELECT ClassID FROM ClassTeachers WHERE ClassID=? AND TeacherID=?", (class_id, teacher_id)).fetchone() is not None:
+        print("This teacher is already assigned to this class.")
+        return False
+
+
     c.execute("INSERT INTO ClassTeachers(ClassID, TeacherID) VALUES(?, ?);", 
               (class_id, teacher_id))
     connection.commit()
@@ -322,7 +353,7 @@ def add_student_to_class():
         print("You must be logged in to add a student to a class.")
         return
     
-    if c.execute("SELECT UserRole FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0].lower() != "teacher":
+    if get_user_role(current_user_token) != "teacher":
         print("Entry denied! Only teachers can add students to classes.")
         return False
     
@@ -340,7 +371,7 @@ def request_to_join_class():
         print("You must be logged in to request to join a class.")
         return
     
-    if c.execute("SELECT UserRole FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0].lower() != "student":
+    if get_user_role(current_user_token) != "student":
         print("Entry denied! Only students can request to join classes.")
         return False
     
@@ -352,7 +383,10 @@ def request_to_join_class():
         return False
     
 
-    student_id = c.execute("SELECT StudentID FROM Students WHERE UserID=?", (current_user_token,)).fetchone()[0]
+    student_id = get_student_id(current_user_token)
+    if c.execute("SELECT StudentID FROM Enrollment WHERE StudentID=? AND ClassID=?", (student_id, class_id)).fetchone() is not None:
+        print("You are already enrolled in this class.")
+        return False
     
     c.execute("INSERT INTO EnrollmentRequests(StudentID, ClassID) VALUES(?, ?);", 
               (student_id, class_id))
@@ -367,7 +401,7 @@ def approve_enrollment_request():
         print("You must be logged in to approve enrollment requests.")
         return
     
-    if c.execute("SELECT UserRole FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0].lower() != "teacher":
+    if get_user_role(current_user_token) != "teacher":
         print("Entry denied! Only teachers can approve enrollment requests.")
         return False
     
@@ -407,7 +441,7 @@ def add_busy_time():
         print("You must be logged in to add the times when you are busy.")
         return False
     
-    if c.execute("SELECT UserRole FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0].lower() != "student":
+    if get_user_role(current_user_token) != "student":
         print("Entry denied! Only students can add their busy periods.")
         return False
     
@@ -415,7 +449,7 @@ def add_busy_time():
     start_time = datetime.strptime(start_time, "%H:%M").strftime("%H:%M")
     end_time = input("Enter the end time (HH:MM): ")
     end_time = datetime.strptime(end_time, "%H:%M").strftime("%H:%M")   
-    student_id = c.execute("SELECT StudentID FROM Students WHERE UserID=?", (current_user_token,)).fetchone()[0]
+    student_id = get_student_id(current_user_token)
 
     c.execute("INSERT INTO StudentBusyTimes(StudentID, StartTime, EndTime) VALUES(?, ?, ?);", 
               (student_id, start_time, end_time))
@@ -428,14 +462,14 @@ def add_period():
         print("You must be logged in to add a period.")
         return False
     
-    if c.execute("SELECT UserRole FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0].lower() != "teacher":
+    if get_user_role(current_user_token) != "teacher":
         print("Entry denied! Only teachers can add periods.")
         return False
     
     start_time = input("Enter the start time (HH:MM): ")
     end_time = input("Enter the end time (HH:MM): ")
     class_id = int(input("Enter the class ID: "))
-    teacher_id = c.execute("SELECT TeacherID FROM Teachers WHERE UserID=?", (current_user_token,)).fetchone()[0]
+    teacher_id = get_teacher_id(current_user_token)
     
     c.execute("INSERT INTO Periods(StartTime, EndTime, ClassID, TeacherID) VALUES(?, ?, ?, ?);", 
               (start_time, end_time, class_id, teacher_id))
@@ -461,7 +495,7 @@ def add_teacher_to_school():
         print("You must be logged in to add a teacher to a school.")
         return
     
-    if c.execute("SELECT UserRole FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0].lower() != "teacher":
+    if get_user_role(current_user_token) != "teacher":
         print("Entry denied! Only teachers can add teachers to schools.")
         return False
     
@@ -475,7 +509,7 @@ def add_teacher_to_school():
         return False
     
     teacher_id = c.execute("SELECT UserID FROM Users WHERE Email=?", (teacher_email,)).fetchone()[0]
-    school_id = c.execute("SELECT SchoolID FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0]
+    school_id = get_school_id(current_user_token)
     c.execute("UPDATE Users SET SchoolID = ? WHERE UserID = ?;", (school_id, c.execute("SELECT UserID FROM Users WHERE Email=?", (teacher_email,)).fetchone()[0]))
 
 def request_to_join_school():
@@ -485,7 +519,7 @@ def request_to_join_school():
         return False
     
     school_id = int(input("Enter the school ID you want to join: "))
-    school_exists = c.execute("SELECT SchoolID FROM Schools WHERE SchoolID=?", (school_id,)).fetchone()
+    school_exists = get_school_id(school_id)
     if school_exists is None:
         print("School does not exist. Please check the school ID and try again.")
         return False
@@ -531,69 +565,57 @@ def approve_school_join_request():
             else:
                 print("Invalid choice. Please enter 'Y' or 'N'.")
 
-def student_options():
+def logout():
     global current_user_token
-    while current_user_token is not None:
+    if current_user_token is None:
+        print("You are not logged in.")
+        log_in()
+    print("Logging out...")
+    current_user_token = None
+    print("You have been logged out successfully.")
+    log_in()  # Redirect to login after logout
+
+def student_options():
+    actions = {
+        "1": request_to_join_class,
+        "2": add_busy_time,
+        "3": request_to_join_school,
+        "4": logout
+    }
+    while current_user_token:
+        print("\n📘 Student Menu:")
         print("1. Request to join a class")
         print("2. Add busy time")
         print("3. Request to join a school")
         print("4. Log out")
-
-        choice = input("Choose an option: ")
-
-        if choice == "1":
-            request_to_join_class()
-        elif choice == "2":
-            add_busy_time()
-        elif choice == "3":
-            request_to_join_school()
-        elif choice == "4":
-            current_user_token = None
-            print("✅ Logged out successfully.")
+        action = input("Choose an option: ")
+        if action in actions:
+            actions[action]()
         else:
-            print("❌ Invalid option. Please try again.")
-
+            print("❌ Invalid option.")
 
 def teacher_options():
-    global current_user_token
-    while current_user_token is not None:
-        print("1. Add a school")
-        print("2. Add a class")
-        print("3. Add a teacher to a class")
-        print("4. Add a student to a class")
-        print("5. Approve enrollment requests")
-        print("6. Add a period")
-        print("7. Add teacher to school")
-        print("8. Approve school join requests")
-        print("9. Request to join a school")
-        print("10. Log out")
-
-        choice = input("Choose an option: ")
-
-        if choice == "1":
-            add_school()
-        elif choice == "2":
-            add_class()
-        elif choice == "3":
-            add_teacher_to_class()
-        elif choice == "4":
-            add_student_to_class()
-        elif choice == "5":
-            approve_enrollment_request()
-        elif choice == "6":
-            add_period()
-        elif choice == "7":
-            add_teacher_to_school()
-        elif choice == "8":
-            approve_school_join_request()
-        elif choice == "9":
-            request_to_join_school()
-        elif choice == "10":
-            current_user_token = None
-            print("✅ Logged out successfully.")
+    actions = {
+        "1": add_school,
+        "2": add_class,
+        "3": add_teacher_to_class,
+        "4": add_student_to_class,
+        "5": approve_enrollment_request,
+        "6": add_period,
+        "7": add_teacher_to_school,
+        "8": approve_school_join_request,
+        "9": request_to_join_school,
+        "10": logout
+    }
+    while current_user_token:
+        print("\n📗 Teacher Menu:")
+        for k, v in actions.items():
+            label = v.__name__.replace("_", " ").title()
+            print(f"{k}. {label}")
+        action = input("Choose an option: ")
+        if action in actions:
+            actions[action]()
         else:
-            print("❌ Invalid option. Please try again.")
-
-
+            print("❌ Invalid option.")
 
 log_in()
