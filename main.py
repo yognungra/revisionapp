@@ -188,6 +188,7 @@ c.execute("""
         DateAssigned DATE DEFAULT current_date NOT NULL,
         ClassID INTEGER NOT NULL,
         TeacherID INTEGER NOT NULL,
+        AssignmentID INTEGER DEFAULT NULL,
         FOREIGN KEY(ClassID) REFERENCES Classes(ClassID) ON DELETE CASCADE ON UPDATE CASCADE,
         FOREIGN KEY(TeacherID) REFERENCES Teachers(TeacherID) ON DELETE CASCADE ON UPDATE CASCADE
     );
@@ -332,7 +333,7 @@ def sign_up():
 
     # Insert User
     c.execute("""INSERT INTO Users (FirstName, LastName, Email, PasswordHash, UserRole)
-                 VALUES (?, ?, ?, ?, ?, ?)""", (first_name, last_name, email, hashed_password, user_role))
+                 VALUES (?, ?, ?, ?, ?)""", (first_name, last_name, email, hashed_password, user_role))
     connection.commit()
     
     user_id = c.execute("SELECT UserID FROM Users WHERE Email=?", (email,)).fetchone()[0]
@@ -348,9 +349,6 @@ def sign_up():
     else:
         c.execute("INSERT INTO Teachers (UserID) VALUES (?)", (user_id,))
 
-    if school_id:
-        c.execute("INSERT INTO SchoolJoinRequests (UserID, SchoolID) VALUES (?, ?)", (user_id, school_id))
-    
     connection.commit()
     print("🎉 Registration complete!")
     return student_options() if user_role == "student" else teacher_options()
@@ -386,6 +384,10 @@ def add_class():
     
     if get_user_role(current_user_token) != "teacher":
         print("Entry denied! Only teachers can add classes.")
+        return False
+    
+    if get_school_id(current_user_token) is None:
+        print("You must be associated with a school to add a class.")
         return False
     
     input_verified = False
@@ -428,7 +430,7 @@ def add_teacher_to_class():
 
     c.execute("SELECT SchoolID FROM Classes WHERE ClassID=?", (class_id,))
     school_id = c.fetchone()
-    if c.execute("SELECT SchoolID FROM Users WHERE UserID=?", (teacher_id,)).fetchone()[0] != school_id[0]:
+    if c.execute("SELECT SchoolID FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0] != school_id[0]:
         print("Entry denied! The teacher must belong to the same school as the class.")
         return False
     
@@ -478,6 +480,9 @@ def request_to_join_class():
         print("Class does not exist. Please check the class ID and try again.")
         return False
     
+    if c.execute("SELECT SchoolID FROM Classes WHERE ClassID=?", (class_id,)).fetchone()[0] != get_school_id(current_user_token):
+        print("Entry denied! You can only request to join classes in your school.")
+        return False
 
     student_id = get_student_id(current_user_token)
     if c.execute("SELECT StudentID FROM Enrollment WHERE StudentID=? AND ClassID=?", (student_id, class_id)).fetchone() is not None:
@@ -626,7 +631,7 @@ def request_to_join_school():
         except ValueError:
             print("Invalid input. Please enter a valid school ID.")
     school_id = int(input("Enter the school ID you want to join: "))
-    school_exists = get_school_id(school_id)
+    school_exists = c.execute("SELECT SchoolID FROM Schools WHERE SchoolID=?", (school_id,)).fetchone()
     if school_exists is None:
         print("School does not exist. Please check the school ID and try again.")
         return False
@@ -745,15 +750,37 @@ def add_homework_task():
             homework_type_choice = int(input("Enter the number corresponding to the homework type: ")) - 1
             if homework_type_choice < 0 or homework_type_choice >= len(homework_types):
                 raise ValueError("Invalid choice. Please select a valid option.")
-            homework_type = homework_types[homework_type_choice]
+            homework_type_choice = homework_types[homework_type_choice]
             homework_type_choice_verified = True
         except ValueError as e:
             print(f"Error: {e}. Please try again.")
 
-
-    c.execute("INSERT INTO HomeworkTasks(Title, Description, TimeToComplete, DueDate, HomeworkType, ClassID, TeacherID) VALUES(?, ?, ?, ?, ?, ?);",
-              (title, description, time_to_complete, due_date, homework_type_choice, selected_class_id, teacher_id))
+    if homework_type_choice == "Quiz":
+        assignment_id = input("Enter the Quiz ID (or leave blank to create a new quiz): ").strip()
+        if assignment_id:
+            try:
+                assignment_id = int(assignment_id)
+                c.execute("SELECT AssignmentID FROM QuizQuestionAssignmnts WHERE QuizID=?", (assignment_id,))
+                if c.fetchone() is None:
+                    print("Quiz ID does not exist. Creating a new quiz.")
+                    assignment_id = None
+            except ValueError:
+                print("Invalid Quiz ID. Creating a new quiz.")
+                assignment_id = None
+        if not assignment_id:
+            print("Create a new quiz first then come back to add the homework task.")
+            return False
     
+    c.execute("INSERT INTO HomeworkTasks(Title, Description, TimeToComplete, DueDate, HomeworkType, ClassID, TeacherID, AssignmentID) VALUES(?, ?, ?, ?, ?, ?, ?, ?);",
+                  (title, description, time_to_complete, due_date, homework_type_choice, selected_class_id, teacher_id, assignment_id))
+
+
+    connection.commit()
+    return True 
+    
+
+
+
 
 def create_quiz_from_pool():
     global current_user_token
@@ -786,7 +813,13 @@ def create_quiz_from_pool():
     
     quiz_title = input("Enter quiz title: ")
     c.execute("INSERT INTO Quizzes (Title, ClassID, TeacherID) VALUES (?, ?, ?)", (quiz_title, class_id, teacher_id))
-    quiz_id = c.lastrowid
+    c.execute("""
+    SELECT QuizID
+    FROM Quizzes
+    WHERE Title = ? AND ClassID = ? AND TeacherID = ?
+    ORDER BY QuizID ASC
+""", (quiz_title, class_id, teacher_id))
+    quiz_id = c.fetchone()[-1]
 
     # Select topic
     topics = c.execute("SELECT TopicID, TopicName FROM QuestionTopics WHERE SchoolID=?", (school_id,)).fetchall()
@@ -815,6 +848,7 @@ def create_quiz_from_pool():
         c.execute("INSERT INTO QuizQuestionAssignments (QuizID, QuestionID) VALUES (?, ?)", (quiz_id, int(qid)))
     
     connection.commit()
+
     print(f"✅ Quiz '{quiz_title}' created successfully with ID {quiz_id}")
 
 def get_next_question(student_id, quiz_id):
