@@ -194,7 +194,7 @@ c.execute("""
         SchoolID INTEGER NOT NULL,
         TopicName TEXT NOT NULL,
         UNIQUE(SchoolID, TopicName),
-        FOREIGN KEY (SchoolID) REFERENCES Schools(SchoolID) ON DELETE CASCADE ON UPDATE CASCADE,
+        FOREIGN KEY (SchoolID) REFERENCES Schools(SchoolID) ON DELETE CASCADE ON UPDATE CASCADE
     );
 """)
 

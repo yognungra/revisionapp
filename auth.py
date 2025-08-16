@@ -1,5 +1,4 @@
 from databasee import connection, c
-from auth import session
 from datetime import datetime
 
 import sqlite3
@@ -11,13 +10,15 @@ import random
 import pandas as pd
 import os
 
+import sqlite3
+
 ph = PasswordHasher()
 
 current_user_token = None
 
 from session import session
-from school import add_school, add_class, add_teacher_to_class, add_student_to_class, approve_enrollment_request, add_period, add_teacher_to_school, approve_school_join_request, request_to_join_school
-from tasks import add_homework_task, create_quiz_from_pool, add_topic, add_quiz_question, bulk_upload_questions, add_busy_time, request_to_join_class
+from school import add_school, add_class, add_teacher_to_class, add_student_to_class, approve_enrollment_request, add_period, add_teacher_to_school, approve_school_join_request, request_to_join_school, add_busy_time, request_to_join_class
+from tasks import add_homework_task, create_quiz_from_pool, add_topic, add_quiz_question, bulk_upload_questions
 
 def log_in():
     global current_user_token
@@ -48,8 +49,11 @@ def login_flow():
         try:
             ph.verify(password_hash, password)
             session.login(user_id, role)
+            current_user_token = user_id
+            session.start_time = datetime.now()
+            session.role = role
             print(f"✅ Login successful! User ID: {session.get_user_id()}")
-            return student_options() if role.lower() == "student" else teacher_options()
+            student_options() if role.lower() == "student" else teacher_options()
         except:
             print("❌ Incorrect password. Please try again.")
 

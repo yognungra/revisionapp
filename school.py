@@ -2,7 +2,7 @@ from databasee import c, connection
 from session import session
 from databasee import get_school_id, get_teacher_id, get_student_id
 from datetime import datetime
-
+import sqlite3
 
 def add_school():
     global current_user_token
@@ -150,7 +150,14 @@ def request_to_join_class():
         print("Entry denied! Only students can request to join classes.")
         return False
     
-    class_id = int(input("Enter the class ID you want to join: "))
+    verified = False
+    while not verified:
+        try:
+            class_id = int(input("Enter the class ID you want to join: "))
+            verified = True
+        except:
+            print("Invalid class ID. Please try again")
+    
 
     class_exists = c.execute("SELECT ClassID FROM Classes WHERE ClassID=?", (class_id,)).fetchone()
     if class_exists is None:
