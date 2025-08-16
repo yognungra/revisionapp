@@ -8,7 +8,7 @@ import pandas as pd
 import os
 
 ph = PasswordHasher()
-
+from session import session
 
 # Connect to the SQLite database
 connection = sqlite3.connect("tables.db")
@@ -215,7 +215,7 @@ c.execute("""
         SchoolID INTEGER NOT NULL,
         TopicName TEXT NOT NULL,
         UNIQUE(SchoolID, TopicName),
-        FOREIGN KEY (SchoolID) REFERENCES Schools(SchoolID) ON DELETE CASCADE
+        FOREIGN KEY (SchoolID) REFERENCES Schools(SchoolID) ON DELETE CASCADE ON UPDATE CASCADE,
     );
 """)
 
@@ -230,8 +230,8 @@ c.execute("""
         AnswerOptions TEXT NOT NULL,  -- JSON string containing answer options
         CorrectAnswer TEXT NOT NULL,
         DateAdded DATE DEFAULT current_date NOT NULL,
-        FOREIGN KEY (SchoolID) REFERENCES Schools(SchoolID) ON DELETE CASCADE,
-        FOREIGN KEY (TopicID) REFERENCES QuestionTopics(TopicID) ON DELETE CASCADE
+        FOREIGN KEY (SchoolID) REFERENCES Schools(SchoolID) ON DELETE CASCADE ON UPDATE CASCADE,
+        FOREIGN KEY (TopicID) REFERENCES QuestionTopics(TopicID) ON DELETE CASCADE ON UPDATE CASCADE
     );
 """)
 
@@ -244,7 +244,7 @@ c.execute("""
         TeacherID INTEGER NOT NULL,
         DateAssigned DATE DEFAULT current_date NOT NULL,
         FOREIGN KEY(ClassID) REFERENCES Classes(ClassID) ON DELETE CASCADE,
-        FOREIGN KEY(TeacherID) REFERENCES Teachers(TeacherID) ON DELETE CASCADE
+        FOREIGN KEY(TeacherID) REFERENCES Teachers(TeacherID) ON DELETE CASCADE ON UPDATE CASCADE
     );
 """)
 
@@ -254,8 +254,8 @@ c.execute("""
         AssignmentID INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
         QuizID INTEGER NOT NULL,
         QuestionID INTEGER NOT NULL,
-        FOREIGN KEY(QuizID) REFERENCES Quizzes(QuizID) ON DELETE CASCADE,
-        FOREIGN KEY(QuestionID) REFERENCES QuizQuestions(QuestionID) ON DELETE CASCADE
+        FOREIGN KEY(QuizID) REFERENCES Quizzes(QuizID) ON DELETE CASCADE ON UPDATE CASCADE,
+        FOREIGN KEY(QuestionID) REFERENCES QuizQuestions(QuestionID) ON DELETE CASCADE ON UPDATE CASCADE
     );
 """)
 
@@ -289,8 +289,8 @@ def login_flow():
         password = input("Password: ")
         try:
             ph.verify(password_hash, password)
-            current_user_token = user_id
-            print(f"✅ Login successful! User ID: {current_user_token}")
+            session.login(user_id, role)
+            print(f"✅ Login successful! User ID: {session.get_user_id()}")
             return student_options() if role.lower() == "student" else teacher_options()
         except:
             print("❌ Incorrect password. Please try again.")
@@ -338,6 +338,7 @@ def sign_up():
     
     user_id = c.execute("SELECT UserID FROM Users WHERE Email=?", (email,)).fetchone()[0]
     current_user_token = user_id
+    session.login(user_id, user_role)
 
     if school_id:
         c.execute("INSERT INTO SchoolJoinRequests (UserID, SchoolID) VALUES (?, ?)", (current_user_token, school_id))
@@ -355,38 +356,38 @@ def sign_up():
 
 def add_school():
     global current_user_token
-    if current_user_token is None:
+    if session.is_logged_in() is False:
         print("You must be logged in to add a school.")
         return False
-    if get_user_role(current_user_token) != "teacher":
+    if not session.require_role("teacher"):
         print("Entry denied! Only teachers can add schools.")
         return False
-    if c.execute("SELECT IsSchoolAdmin FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0]:
+    if c.execute("SELECT IsSchoolAdmin FROM Users WHERE UserID=?", (session.get_user_id(),)).fetchone()[0]:
         print("Entry denied! You are already a school admin. Leave the school admin role to add a new school.")
         return False
     
     # Check if the user is a teacher and not already a school admin
-    c.execute("UPDATE Users SET IsSchoolAdmin = TRUE WHERE UserID = ?", (current_user_token,))
+    c.execute("UPDATE Users SET IsSchoolAdmin = TRUE WHERE UserID = ?", (session.get_user_id(),))
     print("You are now a school admin.")
 
     school_name = input("Enter the school name: ")
     c.execute("INSERT INTO Schools(SchoolName) VALUES(?);", (school_name,))
     c.execute("UPDATE Users SET SchoolID = (SELECT SchoolID FROM Schools WHERE SchoolName = ?) WHERE UserID = ?;", 
-              (school_name, current_user_token))
+              (school_name, session.get_user_id()))
     connection.commit()
     print("School added successfully!")
 
 def add_class():
     global current_user_token
-    if current_user_token is None:
+    if session.is_logged_in() is False:
         print("You must be logged in to add a class.")
         return False
     
-    if get_user_role(current_user_token) != "teacher":
+    if not session.require_role("teacher"):
         print("Entry denied! Only teachers can add classes.")
         return False
     
-    if get_school_id(current_user_token) is None:
+    if get_school_id(session.get_user_id()) is None:
         print("You must be associated with a school to add a class.")
         return False
     
@@ -402,7 +403,7 @@ def add_class():
             continue
         else:
             input_verified = True
-    school_id = get_school_id(current_user_token)
+    school_id = get_school_id(session.get_user_id())
     c.execute("INSERT INTO Classes(LocalClassIdentifier, SchoolID) VALUES(?, ?);", 
               (local_class_identifier, school_id))
     connection.commit()
@@ -412,25 +413,25 @@ def add_class():
 
 def add_teacher_to_class():
     global current_user_token
-    if current_user_token is None:
+    if session.is_logged_in() is False:
         print("You must be logged in to add a teacher to a class.")
         return
     
-    if get_user_role(current_user_token) != "teacher":
+    if not session.require_role("teacher"):
         print("Entry denied! Only teachers can add teachers to classes.")
         return False
     
-    if not c.execute("SELECT IsSchoolAdmin FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0]:
+    if not c.execute("SELECT IsSchoolAdmin FROM Users WHERE UserID=?", (session.get_user_id(),)).fetchone()[0]:
         print("Entry denied! You must be a school admin to add teachers to your classes.")
         return False
     
 
     class_id = int(input("Enter the class ID: "))
-    teacher_id = int(input("Enter the teacher ID (or leave blank to select yourself): ") or get_teacher_id(current_user_token))
+    teacher_id = int(input("Enter the teacher ID (or leave blank to select yourself): ") or get_teacher_id(session.get_user_id()))
 
     c.execute("SELECT SchoolID FROM Classes WHERE ClassID=?", (class_id,))
     school_id = c.fetchone()
-    if c.execute("SELECT SchoolID FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0] != school_id[0]:
+    if c.execute("SELECT SchoolID FROM Users WHERE UserID=?", (session.get_user_id(),)).fetchone()[0] != school_id[0]:
         print("Entry denied! The teacher must belong to the same school as the class.")
         return False
     
@@ -447,11 +448,11 @@ def add_teacher_to_class():
 
 def add_student_to_class():
     global current_user_token
-    if current_user_token is None:
+    if session.is_logged_in() is False:
         print("You must be logged in to add a student to a class.")
         return
     
-    if get_user_role(current_user_token) != "teacher":
+    if not session.require_role("teacher"):
         print("Entry denied! Only teachers can add students to classes.")
         return False
     
@@ -465,11 +466,11 @@ def add_student_to_class():
 
 def request_to_join_class():
     global current_user_token
-    if current_user_token is None:
+    if session.is_logged_in() is False:
         print("You must be logged in to request to join a class.")
         return
     
-    if get_user_role(current_user_token) != "student":
+    if not session.require_role("student"):
         print("Entry denied! Only students can request to join classes.")
         return False
     
@@ -480,11 +481,11 @@ def request_to_join_class():
         print("Class does not exist. Please check the class ID and try again.")
         return False
     
-    if c.execute("SELECT SchoolID FROM Classes WHERE ClassID=?", (class_id,)).fetchone()[0] != get_school_id(current_user_token):
+    if c.execute("SELECT SchoolID FROM Classes WHERE ClassID=?", (class_id,)).fetchone()[0] != get_school_id(session.get_user_id()):
         print("Entry denied! You can only request to join classes in your school.")
         return False
 
-    student_id = get_student_id(current_user_token)
+    student_id = get_student_id(session.get_user_id())
     if c.execute("SELECT StudentID FROM Enrollment WHERE StudentID=? AND ClassID=?", (student_id, class_id)).fetchone() is not None:
         print("You are already enrolled in this class.")
         return False
@@ -498,15 +499,15 @@ def request_to_join_class():
 
 def approve_enrollment_request():
     global current_user_token
-    if current_user_token is None:
+    if session.is_logged_in() is False:
         print("You must be logged in to approve enrollment requests.")
         return
     
-    if get_user_role(current_user_token) != "teacher":
+    if not session.require_role("teacher"):
         print("Entry denied! Only teachers can approve enrollment requests.")
         return False
     
-    list_requests = c.execute("SELECT RequestID, StudentID, ClassID FROM EnrollmentRequests WHERE ClassID IN (SELECT ClassID FROM ClassTeachers WHERE TeacherID=(SELECT TeacherID FROM Teachers WHERE UserID=?));", (current_user_token,)).fetchall()
+    list_requests = c.execute("SELECT RequestID, StudentID, ClassID FROM EnrollmentRequests WHERE ClassID IN (SELECT ClassID FROM ClassTeachers WHERE TeacherID=(SELECT TeacherID FROM Teachers WHERE UserID=?));", (session.get_user_id(),)).fetchall()
     if not list_requests:
         print("No enrollment requests to approve.")
         return False
@@ -538,11 +539,11 @@ def approve_enrollment_request():
 
 def add_busy_time():
     global current_user_token
-    if current_user_token is None:
+    if session.is_logged_in() is False:
         print("You must be logged in to add the times when you are busy.")
         return False
     
-    if get_user_role(current_user_token) != "student":
+    if not session.require_role("student"):
         print("Entry denied! Only students can add their busy periods.")
         return False
     
@@ -550,7 +551,7 @@ def add_busy_time():
     start_time = datetime.strptime(start_time, "%H:%M").strftime("%H:%M")
     end_time = input("Enter the end time (HH:MM): ")
     end_time = datetime.strptime(end_time, "%H:%M").strftime("%H:%M")   
-    student_id = get_student_id(current_user_token)
+    student_id = get_student_id(session.get_user_id())
 
     c.execute("INSERT INTO StudentBusyTimes(StudentID, StartTime, EndTime) VALUES(?, ?, ?);", 
               (student_id, start_time, end_time))
@@ -559,18 +560,18 @@ def add_busy_time():
 
 def add_period():
     global current_user_token
-    if current_user_token is None:
+    if session.is_logged_in() is False:
         print("You must be logged in to add a period.")
         return False
     
-    if get_user_role(current_user_token) != "teacher":
+    if not session.require_role("teacher"):
         print("Entry denied! Only teachers can add periods.")
         return False
     
     start_time = input("Enter the start time (HH:MM): ")
     end_time = input("Enter the end time (HH:MM): ")
     class_id = int(input("Enter the class ID: "))
-    teacher_id = get_teacher_id(current_user_token)
+    teacher_id = get_teacher_id(session.get_user_id())
     
     c.execute("INSERT INTO Periods(StartTime, EndTime, ClassID, TeacherID) VALUES(?, ?, ?, ?);", 
               (start_time, end_time, class_id, teacher_id))
@@ -592,15 +593,15 @@ def add_period():
 
 def add_teacher_to_school():
     global current_user_token
-    if current_user_token is None:
+    if session.is_logged_in() is False:
         print("You must be logged in to add a teacher to a school.")
         return
     
-    if get_user_role(current_user_token) != "teacher":
+    if not session.require_role("teacher"):
         print("Entry denied! Only teachers can add teachers to schools.")
         return False
     
-    if not c.execute("SELECT IsSchoolAdmin FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0]:
+    if not c.execute("SELECT IsSchoolAdmin FROM Users WHERE UserID=?", (session.get_user_id(),)).fetchone()[0]:
         print("Entry denied! You must be a school admin to add teachers to your school.")
         return False
     
@@ -610,12 +611,12 @@ def add_teacher_to_school():
         return False
     
     teacher_id = c.execute("SELECT UserID FROM Users WHERE Email=?", (teacher_email,)).fetchone()[0]
-    school_id = get_school_id(current_user_token)
+    school_id = get_school_id(session.get_user_id())
     c.execute("UPDATE Users SET SchoolID = ? WHERE UserID = ?;", (school_id, c.execute("SELECT UserID FROM Users WHERE Email=?", (teacher_email,)).fetchone()[0]))
 
 def request_to_join_school():
     global current_user_token
-    if current_user_token is None:
+    if session.is_logged_in() is False:
         print("You must be logged in to request to join a school.")
         return False
     
@@ -636,7 +637,7 @@ def request_to_join_school():
         print("School does not exist. Please check the school ID and try again.")
         return False
     c.execute("INSERT INTO SchoolJoinRequests(UserID, SchoolID) VALUES(?, ?);", 
-          (current_user_token, school_id))
+          (session.get_user_id(), school_id))
     connection.commit()
     print("Request to join school submitted successfully!")
 
@@ -644,11 +645,11 @@ def approve_school_join_request():
     if current_user_token is None:
         print("You must be logged in to approve school join requests.")
         return
-    if c.execute("SELECT isSchoolAdmin FROM Users WHERE UserID=?", (current_user_token,)).fetchone()[0] is False:
+    if c.execute("SELECT isSchoolAdmin FROM Users WHERE UserID=?", (session.get_user_id(),)).fetchone()[0] is False:
         print("Entry denied! Only school admins can approve school join requests.")
         return False
     
-    requests = c.execute("SELECT RequestID, UserID FROM SchoolJoinRequests WHERE Status='Pending' AND SchoolID=(SELECT SchoolID FROM Users WHERE UserID=?);", (current_user_token,)).fetchall()
+    requests = c.execute("SELECT RequestID, UserID FROM SchoolJoinRequests WHERE Status='Pending' AND SchoolID=(SELECT SchoolID FROM Users WHERE UserID=?);", (session.get_user_id(),)).fetchall()
     if not requests:
         print("No school join requests to approve.")
         return False
@@ -680,16 +681,16 @@ def approve_school_join_request():
 
 def add_homework_task():
     global current_user_token
-    if current_user_token is None:
+    if session.is_logged_in() is False:
         print("You must be logged in to add a homework task.")
         return
     
-    if get_user_role(current_user_token) != "teacher":
+    if not session.require_role("teacher"):
         print("Entry denied! Only teachers can add homework tasks.")
         return False
     
-    teacher_id = get_teacher_id(current_user_token)
-    classes = c.execute("SELECT ClassID, LocalClassIdentifier FROM Classes WHERE SchoolID=(SELECT SchoolID FROM Users WHERE UserID=?)", (current_user_token,)).fetchall()
+    teacher_id = get_teacher_id(session.get_user_id())
+    classes = c.execute("SELECT ClassID, LocalClassIdentifier FROM Classes WHERE SchoolID=(SELECT SchoolID FROM Users WHERE UserID=?)", (session.get_user_id(),)).fetchall()
 
     if not classes:
         print("You are not associated with any classes. Please create a class first.")
@@ -784,15 +785,15 @@ def add_homework_task():
 
 def create_quiz_from_pool():
     global current_user_token
-    if current_user_token is None:
+    if session.is_logged_in() is False:
         print("You must be logged in to create a quiz.")
         return
-    if get_user_role(current_user_token) != "teacher":
+    if get_user_role(session.get_user_id()) != "teacher":
         print("Only teachers can create quizzes.")
         return
     
-    teacher_id = get_teacher_id(current_user_token)
-    school_id = get_school_id(current_user_token)
+    teacher_id = get_teacher_id(session.get_user_id())
+    school_id = get_school_id(session.get_user_id())
 
     # Select class
     classes = c.execute("""
@@ -900,14 +901,14 @@ def get_next_question(student_id, quiz_id):
     """, (quiz_id, next_diff, student_id, quiz_id)).fetchone()
 
 def add_topic():
-    if current_user_token is None:
+    if session.is_logged_in() is False:
         print("You must be logged in to add a topic.")
         return
-    if get_user_role(current_user_token) != "teacher":
+    if not session.require_role("teacher"):
         print("Only teachers can add topics.")
         return
 
-    school_id = get_school_id(current_user_token)
+    school_id = get_school_id(session.get_user_id())
     topic_name = input("Enter topic name: ").strip()
 
     try:
@@ -922,14 +923,14 @@ def add_topic():
 
 
 def add_quiz_question():
-    if current_user_token is None:
+    if session.is_logged_in() is False:
         print("You must be logged in to add a quiz question.")
         return
-    if get_user_role(current_user_token) != "teacher":
+    if not session.require_role("teacher"):
         print("Only teachers can add quiz questions.")
         return
 
-    school_id = get_school_id(current_user_token)
+    school_id = get_school_id(session.get_user_id())
 
     # Select topic
     topics = c.execute("""
@@ -975,14 +976,14 @@ def add_quiz_question():
     print("✅ Question added successfully to your school’s question pool.")
 
 def bulk_upload_questions():
-    if current_user_token is None:
+    if session.is_logged_in() is False:
         print("You must be logged in to upload questions.")
         return
-    if get_user_role(current_user_token) != "teacher":
+    if not session.require_role("teacher"):
         print("Only teachers can upload questions.")
         return
 
-    school_id = get_school_id(current_user_token)
+    school_id = get_school_id(session.get_user_id())
     file_path = input("Enter path to your CSV or Excel file: ").strip()
 
     if not os.path.exists(file_path):
@@ -1098,16 +1099,16 @@ from openpyxl.worksheet.datavalidation import DataValidation
 
 def generate_upload_template():
     global current_user_token
-    if current_user_token is None:
+    if session.is_logged_in() is False:
         print("❌ You must be logged in to generate the template.")
         return
 
-    role = get_user_role(current_user_token)
+    role = session.role.lower()
     if role != "teacher":
         print("❌ Only teachers can generate the upload template.")
         return
 
-    school_id = get_school_id(current_user_token)
+    school_id = get_school_id(session.get_user_id())
 
     # Get topic names for dropdown
     topic_rows = c.execute("SELECT TopicName FROM QuestionTopics WHERE SchoolID=?", (school_id,)).fetchall()
@@ -1140,12 +1141,13 @@ def generate_upload_template():
 
 def logout():
     global current_user_token
-    if current_user_token is None:
+    if session.is_logged_in() is False:
         print("You are not logged in.")
         log_in()
         return
     print("Logging out...")
     current_user_token = None
+    session.logout()
     print("You have been logged out successfully.")
     log_in()  # Redirect to login after logout
 
@@ -1199,5 +1201,3 @@ def teacher_options():
 
 
 
-create_indexes()
-log_in()
